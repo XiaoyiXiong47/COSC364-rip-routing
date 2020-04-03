@@ -18,24 +18,36 @@ def read_config_file(filename):
     
 def main(filename):
     """main function"""
+    
     #read configuration file
     try:
         routers = read_config_file(filename)
     except:
         print("error occurs at read_config_file")
+        sys.exit()
+    
+    
+    #test configuration data here
     
     
     #create sockets for each input port number
-    #try:
-    d_sockets = {} #a dictionary for created sockets
-    ip_addr = socket.gethostname()
-    for router in routers.keys():
-        for input_port in routers[router]["input_ports"]:
-            s_name = "s" + str(input_port)[2] + str(input_port)[3]
-            d_sockets[s_name] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)#.connect((ip_addr, input_port))
-    print(d_sockets.keys())        
-    #except:
-        #print("sockets creation failed")
+    try:
+        sockets = [] #a list contains created sockets
+        ip_addr = "127.0.0.1"
+        for router in routers.keys():
+            for input_port in routers[router]["input_ports"]:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.bind((ip_addr, input_port))
+                s.listen()
+                sockets.append(s)
+        for i in sockets:
+            print(i)                
+        print("sockets successfully created and binded to a port number")
+    except socket.error as err: 
+        print ("socket creation failed with error {}".format(err))
+        sys.exit()
+
+
     
     
     
