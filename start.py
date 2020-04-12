@@ -1,10 +1,12 @@
 import json
 import socket
 import sys
+import threading
 
 
 ROUTING_TABLES = {} #a dictionary for storing routing tables
 SOCKETS = {} #a dictionary for storing sockets for each router
+
 IP_ADDRESS = "127.0.0.1"
 
 
@@ -18,6 +20,8 @@ def read_config_file(filename):
     #return info about routers as a dic
     return routers
 
+
+
 def create_routing_table (config_data):
     """takes a config data for a router, creates a routing table for it, and 
     stores it in ROUTING_TABLES"""
@@ -25,13 +29,38 @@ def create_routing_table (config_data):
     #create an empty table and store it
     ROUTING_TABLES[table_name] = {"router_id" : config_data["router_id"]}
 
+
+
+def get_output_port(output_comb):
+    """takes a output_port as format in config file ("6012-1-2"),
+    return just a output number itself as integer (6012)"""
+    a = output_comb.split("-")
+    return int(a[0])
+
+
+
+def get_metric(output_comb):
+    """takes a output_pot as format in config file, return the metric as int"""    
+    a = output_comb.split("-")
+    return int(a[1])    
+
+
+
+def get_dest_router(output_comb):
+    """takes a output_pot as format in config file, return just the destination
+    router's id as string"""
+    a = output_comb.split("-")
+    return a[2]  
     
-def get_socket_with_portno (socket_list, portno):
+    
+    
+def get_socket_with_portno (portno):
     """given by a list of sockets and a port number, return a specific socket
     that is binded to that port number"""
-    for s in socket_list:
-        if s.getsockname()[1] == portno:
-            return s
+    for router in SOCKETS.keys():
+        for s in SOCKETS[router]:
+            if s.getsockname()[1] == portno:
+                return s
     # An error handler here
 
 
@@ -42,7 +71,7 @@ def print_single_table(table):
     for route in table.keys():
         if route == "router_id":
             print("======================================================")
-            print("routing table for {}".format(str(table["router_id"])))
+            print("routing table for router{}".format(str(table["router_id"])))
             print("Destination     Metric     Next-hop      Interface") 
     for route in table.keys():
         if route != "router_id":              
@@ -50,22 +79,28 @@ def print_single_table(table):
     print("======================================================")
             
 
+
 def print_routing_tables():
     """print all of the tables by calling subfunction in a loop"""
     for table in ROUTING_TABLES.keys():
         print_single_table(ROUTING_TABLES[table])
 
 
-def close_sockets(sockets_list):
+
+def close_sockets():
     """given by a list contains several sockets, close all"""
-    for s in sockets_list:
-        s.close()
+    for router in SOCKETS.keys():
+        for s in SOCKETS[router]:
+            s.close()
 
 
 
+def del_route(table, route):
+    """delete certain route from table"""
+    del table[route]
 
 
-    
+
 def main(filename):
     """main function"""
     
@@ -78,8 +113,7 @@ def main(filename):
     
     
     #test configuration data here
-    
-    
+        
     
     
     #create sockets for each input port number
@@ -109,7 +143,11 @@ def main(filename):
     except:
         print("routing table creation failed")
     
+    
+    #print out current routing table
     print_routing_tables()
+    
+    
     
     
     
