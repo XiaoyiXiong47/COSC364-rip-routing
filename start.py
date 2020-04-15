@@ -7,32 +7,34 @@ import select
 ROUTERS = {}
 ROUTING_TABLES = {} #a dictionary for storing routing tables
 SOCKETS = {} #a dictionary for storing sockets for each router
+BUFFERS = bytearray() # buffer to contain the routing table and msg packet
 
 IP_ADDRESS = "127.0.0.1"
 
 
+
 class Router:
-    def __init__(self, router_id, inputno, outputno, timer):
+    def __init__(self, router_id, input_no, output_no, timer):
         self.router_id = router_id
         self.table = {}
-        self.inputno = inputno
-        self.outputno = outputno
+        self.input_no = input_no
+        self.output_no = output_no
         self.neighbor = []
         self.timer = timer
         self.status = 1
         self.sockets = {}
     
-    def create_sockets(self, outputno, ip_address):
+    def create_sockets(self, output_no, ip_address):
         """a function that creates socket for each output port number and bind
         them, then return it as a dictionary, whose keys are number and values
         are sockets"""
         result = {}
-        for output in outputno:
+        for output in output_no:
             comb = output.split('-')
-            portno = comb[0]
+            port_no = comb[0]
             dest = comb[2]
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.bind((ip_address, portno))
+            s.bind((ip_address, port_no))
             s.listen() 
             result[dest] = s
         return result
@@ -91,12 +93,29 @@ class Router:
             
     def sendMessage(self, destID, IPaddr, data, SOCKETS):
         """send packet to other router"""
-        
-        
-        
-        
-    def recvMessage(self):
+        for socket in SOCKETS:  # what is the key and value of  this SOCKETS dict ?
+            if socket == SOCKETS[0]:
+                socket.sendto(data,(IPaddr,destID) ## need to fill in dest_port
+            
+
+    def recvMessage(self,theSystem,port_no,IPaddr,destID):
         """receive message"""
+        addr = (IPaddr(IPaddr),port_no)
+        server = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+        server.bind(addr)
+
+        while True:  
+            #receive data
+            data,addr = server.recefrom(port_no)
+            t_data = data.split("-")
+            BUFFERS.write(t_data,utf8())
+            #self.textout.insert(END,t
+            for route in ROUTING_TABLES:
+                if t_data[4] == route[0] and t_data[5] < 16:
+                    dest_port = route[2]
+                    break
+            self.sendMessage(destID,IPaddr,data,SOCKETS)
+
         
 
 
@@ -272,7 +291,6 @@ def main2():
     
     
 main2("config.json")
-
 
 
 
