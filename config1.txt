@@ -1,0 +1,4 @@
+router_id 1
+input-ports 6021,6061,6071
+outputs 6012-1-2 6016-5-6 6017-8-7
+timer 100
