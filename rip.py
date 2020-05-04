@@ -94,7 +94,7 @@ def create_update(dest_router_id, command):
     return data
 
 
-def send_periodic_updates():
+def send_periodic_updates(OUTPUTS):
     """sends periodic updates to all its neighbors"""
     for neighbor in OUTPUTS:
         neighbor = neighbor.split('-')
@@ -123,74 +123,96 @@ def send_triggered_updates(destination):
     s.close()    
 
 
-def process_recved_data(data):
+#already received a packet successfully
+def process_received_data(data):
     """process received data, and update routing table"""
-    global ROUTING_TABLE
-    
-    command = data[0]
-    version = data[1]
-    sender_id = data[2]
-    if command == 1:
-        #packet is request, send routing table to neighbor
-        send_triggered_updates(sender_id)
-    else:
-        #response packet
-        #check the routing table contained in the packet, and update own routing table
-        
-        #calculate the cost for itself to get to the sender of the packet
-        for i in OUTPUTS:
-            i = i.split('-')
-            if int(i[2]) == sender_id:
-                cost_to_sender = int(i[2])
-        #process each RIP entry
-        packet_length = len(data)
-        i = 3
-        while i < packet_length:
-            # Address Family Identifier
-            afi = data[i]
-            # must be zero field
-            zero1 = data[i+1]
-            # destination router id of this route
-            dest = data[i+2]
-            # must be zero field
-            zero2 = data[i+3]
-            zero3 = data[i+4]
-            #metric
-            metric = data[i+5]
-            
-            if zero1 == 0 and zero2 == 0 and zero3 == 0:
-                if afi == 0:
-                    total_cost = metric + cost_to_sender
-                    if dest in ROUTING_TABLE:
-                        if total_cost < ROUTING_TABLE[dest][1]:
-                            #这里的0表示change flag（应该要设置成1的，但是我还没想好怎么处理所以先设置成0）
-                            #180表示timeout的时间，需要做一个计时器，如果在180秒之内还没有收到这条route的新消息，进入deletion阶段（开始garbage-collection timer，将metric设置成16）
-                            #120表示garbage-collection timer，120秒之后将此route从table删除 ( del ROUING_TABLE[dest]  )
-                            #以上这一块待完成
-                            ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
-                        else:
-                            #check if the sender is actually the next hop of this route
-                            if sender_id == ROUTING_TABLE[dest][2]:
-                                #update the metric
-                                #如果是同一更新源，无论如何都更新
-                                if total_cost <= 15: 
-                                    ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
-                                else:
-                                    ROUTING_TABLE[dest] = [dest, 16, sender_id, 0, 180, 120]
-                            else:
-                                #不是同一更新源，丢弃
-                                pass
-                    else:
-                        #this is a new route
-                        if total_cost <= 15:
-                            ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
-            
-            i += 6
-        
+    if data:
+        global ROUTING_TABLE
 
-def set_timer(interval):
-    t = Timer(interval, send_periodic_updates())
-    t.start
+        command = data[0]
+        version = data[1]
+        sender_id = data[2]
+        if command == 1:        #packet is request, send routing table to neighbor
+            send_triggered_updates(sender_id)
+        else:
+            for i in OUTPUTS:#response packet,#calculate the cost for itself to get to the sender of the packet,#check the routing table contained in the packet, and update own routing table
+                i = i.split('-')
+                if int(i[2]) == sender_id:
+                    cost_to_sender = int(i[2])#process each RIP entry
+            packet_length = len(data)
+            i = 3
+            while i < packet_length:
+                # Address Family Identifier
+                afi = data[i]
+                # must be zero field
+                zero1 = data[i+1]
+                # destination router id of this route
+                dest = data[i+2]
+                # must be zero field
+                zero2 = data[i+3]
+                zero3 = data[i+4]
+                #metric
+                metric = data[i+5]
+
+                if zero1 == 0 and zero2 == 0 and zero3 == 0:
+                    if afi == 0:
+                        total_cost = metric + cost_to_sender
+                        if dest in ROUTING_TABLE:
+                            if total_cost < ROUTING_TABLE[dest][1]:
+                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                            else:
+                                #check if the sender is actually the next hop of this route
+                                if sender_id == ROUTING_TABLE[dest][2]:
+                                    #update the metric
+                                    #如果是同一更新源，无论如何都更新
+                                    if total_cost <= 15:
+                                        ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                                    else:
+                                        ROUTING_TABLE[dest] = [dest, 16, sender_id, 0, 180, 120]
+                                else:
+                                    #不是同一更新源，丢弃
+                                    pass
+                        else:
+                            #this is a new route
+                            if total_cost <= 15:
+                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                i += 6
+    else:
+        timer_periodically()
+        if data:
+            process_received_data(data)
+            timer_1.cancel()
+        else:
+            garbage_collection_timer()
+            #send_triggered_updates()
+
+
+
+
+def timer_periodically():
+        global timer_1 # set timer global to
+        timer_1 = threading.Timer(180,timer_periodically) # 递归调用 timer，避免使用 while true block threading
+        timer_1.start()  #start to init the timer  timer.cancel() to stop timer
+
+
+# when packet unfounded after 180sec ,call one more timer
+def garbage_collection_timer(data,datadelete_router):
+    global timer_2
+    #function check nb alive
+    timer_2 = threading.Timer(120,delete_router()) #120s 后，从routing table中删除 该 router 和 routing path
+
+
+
+#after 120sec ,delete the router didn't send packet
+def delete_router(data):
+ for sender_id in ROUTING_TABLE:
+     if data[2] == sender_id:
+         continue
+ else:
+     ROUTING_TABLE[] = ""
+
+
+
 
 
 def main(filename):
@@ -203,27 +225,8 @@ def main(filename):
     ROUTER_ID, INPUT_PORTS, OUTPUTS, TIMER = read_config_file(filename)
     #a list to store sockets, for later closure
     sockets = create_sockets(INPUT_PORTS, IP_ADDRESS)
-
-
-
-
-
-    while True:
-        readable,_,_ = select.select(sockets, [], [])  
-        
-        for r in readable:
-            try:
-                data = r.recv(1024)
-                #received something
-                if data:
-                    process_recved_data(data)
-                    
-            
-                    
-                    
-                    
-                    
-
+    data = create_update(ROUTER_ID, command)
+    send_periodic_updates(OUTPUTS)
 
 
 
