@@ -4,7 +4,7 @@ import sys
 import threading
 import select
 import time
-
+import queue
 
 IP_ADDRESS = "127.0.0.1"
 ROUTER_ID = 0
@@ -12,6 +12,28 @@ INPUT_PORTS = []
 OUTPUTS = []
 TIMER = 0
 ROUTING_TABLE = {}
+message_queue = [] #outgoing message queue
+
+
+
+#result = return of def create_sockets(input_no):
+def event_loop(result):
+    while True:
+        readable,sendable,exceptional=select.select(result,OUTPUTS,[])
+        for sock in readable:# 判断是否 router 要连接
+            #listen to new connection
+            if sock == s: # s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+                conn, addr = s.accept()  # select 监听 socket
+                result.append(conn)                #when there is data been received
+                #put the connection in a queue to preserve the data we want send
+                message_queue[conn]=Queue.Queue()
+            else:
+                data = sock.recv(port_number) #port number is what the socket receive data from
+                if data !="":
+                    message_queue[s].put(data)
+                    if s not in OUTPUTS:
+                        OUTPUTS.append(s) # 将新出现的 router 添加到队列中
+
 
 
 def read_config_file(filename):
@@ -41,7 +63,7 @@ def create_sockets(input_no):
     them, then return it as a list"""
     result = []
     for port in input_no:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         s.bind((IP_ADDRESS, port))
         s.listen(5) 
         result.append(s)
