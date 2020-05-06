@@ -1,0 +1,4 @@
+router_id 3
+input-ports 6023,6043
+outputs 6032-3-2,6034-4-4
+timer 30,90

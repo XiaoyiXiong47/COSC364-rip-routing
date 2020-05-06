@@ -1,0 +1,4 @@
+router_id 5
+input-ports 6045,6065
+outputs 6054-2-4,6056-1-6
+timer 30,90

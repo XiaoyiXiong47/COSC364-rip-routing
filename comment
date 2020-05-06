@@ -1,0 +1,4 @@
+                           #这里的0表示change flag（应该要设置成1的，但是我还没想好怎么处理所以先设置成0）
+                            #180表示timeout的时间，需要做一个计时器，如果在180秒之内还没有收到这条route的新消息，进入deletion阶段（开始garbage-collection timer，将metric设置成16）
+                            #120表示garbage-collection timer，120秒之后将此route从table删除 ( del ROUING_TABLE[dest]  )
+                            #以上这一块待完成
