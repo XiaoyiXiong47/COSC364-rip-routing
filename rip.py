@@ -7,13 +7,14 @@ import time
 import queue
 
 IP_ADDRESS = "127.0.0.1"
-ROUTER_ID = 0
-INPUT_PORTS = []
-OUTPUTS = []
-TIMER = 0
-ROUTING_TABLE = {}
+ROUTER_ID = 0      #1
+INPUT_PORTS = []   # [6021, 6061, 6071]
+OUTPUTS = []       # ['6012-1-2', '6016-5-6', '6017-8-7']
+TIMER = []         # [peirodic_timer, timeout]
+ROUTING_TABLE = {} # {2:[2, 1, 2]; 4:[4, 8, 2]; dest_id:[dest_id, metrix, next_router]}
+SOCKETS = []
 message_queue = [] #outgoing message queue
-timer_dist = {} #key is timer id==router id //value is sec (180,120)
+timer_dist = {}    #key is timer id==router id //value is sec (180,120)
 
 
 #result = return of def create_sockets(input_no):
@@ -47,16 +48,33 @@ def read_config_file(filename):
     for line in data:
         line = line.split()
         if line[0] == "router_id":
-            router_id = int(line[1])
+            if (1 <= int(line[1])) and (int(line[1]) <= 64000):
+                router_id = int(line[1])
+            else:
+                print("router id has to be between 1 and 64000")
+                sys.exit()
         elif line[0] == "input-ports":
             input_ports = line[1].split(',')
             #convert to integer
             for i in range(len(input_ports)):
-                input_ports[i] = int(input_ports[i])
+                if (1024 <= int(input_ports[i])) and (int(input_ports[i]) <= 64000):
+                    input_ports[i] = int(input_ports[i])
+                else:
+                    print("input pot numbers have to be between 1024 and 64000")
+                    sys.exit()
         elif line[0] == "outputs":
             outputs = line[1].split(',')
         elif line[0] == "timer":
-            timer = int(line[1])
+            #timer value for period updates and timeout
+            timer = line[1].split(',')
+            if len(timer) == 2:
+                #there are two timer values, one for periodic updates and one for timeout
+                timer[0] = int(timer[0]) # periodic updates time inteval
+                timer[1] = int(timer[1]) # timeout value
+            else:
+                print("there is missing timer values")
+                sys.exit()
+            
     #return configuration info
     return router_id, input_ports, outputs, timer
 
@@ -64,18 +82,28 @@ def read_config_file(filename):
 def create_sockets(input_no):
     """a function that creates socket for each input port number and bind
     them, then return it as a list"""
-    result = []
-    for port in input_no:
-        s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        s.bind((IP_ADDRESS, port))
-        s.listen(5) 
-        result.append(s)
-    return result
+    try:
+        result = []
+        for port in input_no:
+            s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+            s.bind((IP_ADDRESS, port))
+            s.listen(5) 
+            result.append(s)
+        print("create_sockets() completed")
+        return result
+    except:
+        print("create_sockets() failed")
+        sys.exit()
 
-def close_sockets(sockets):
+def close_sockets():
     """close all sockets"""
-    for s in sockets:
-        s.close()
+    try:
+        for s in SOCKETS:
+            s.close()
+        print("sockets successfully closed")
+    except:
+        print("sockets closure failed")
+        sys.exit()
 
 
 def print_table():
@@ -119,7 +147,7 @@ def create_update(dest_router_id, command):
     return data
 
 
-def send_periodic_updates(OUTPUTS):
+def send_periodic_updates():
     """sends periodic updates to all its neighbors"""
     for neighbor in OUTPUTS:
         neighbor = neighbor.split('-')
@@ -130,7 +158,7 @@ def send_periodic_updates(OUTPUTS):
         data = create_update(neighbor_id, 2)
         #send message to corresponding port
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((IP_ADDRESS, port))        
+        s.connect((IP_ADDRESS, output_port))        
         s.send(data)
         s.close()
 
@@ -159,6 +187,7 @@ def process_received_data(data):
         version = data[1]
         sender_id = data[2]
         if command == 1:        #packet is request, send routing table to neighbor
+            print("received a request packet, send triggered update")
             send_triggered_updates(sender_id)
         else:
             for i in OUTPUTS:#response packet,#calculate the cost for itself to get to the sender of the packet,#check the routing table contained in the packet, and update own routing table
@@ -167,6 +196,7 @@ def process_received_data(data):
                     cost_to_sender = int(i[2])#process each RIP entry
             packet_length = len(data)
             i = 3
+            change_flag = False # a flag indicates invalid route
             while i < packet_length:
                 # Address Family Identifier
                 afi = data[i]
@@ -185,24 +215,29 @@ def process_received_data(data):
                         total_cost = metric + cost_to_sender
                         if dest in ROUTING_TABLE:
                             if total_cost < ROUTING_TABLE[dest][1]:
-                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
                             else:
                                 #check if the sender is actually the next hop of this route
                                 if sender_id == ROUTING_TABLE[dest][2]:
                                     #update the metric
                                     #如果是同一更新源，无论如何都更新
                                     if total_cost <= 15:
-                                        ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                                        ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
                                     else:
-                                        ROUTING_TABLE[dest] = [dest, 16, sender_id, 0, 180, 120]
+                                        ROUTING_TABLE[dest] = [dest, 16, sender_id]
+                                        change_flag = True
                                 else:
                                     #不是同一更新源，丢弃
                                     pass
                         else:
                             #this is a new route
                             if total_cost <= 15:
-                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id, 0, 180, 120]
+                                ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
                 i += 6
+            if change_flag:
+                # there is at least one route has become invalid
+                # triggered updates
+                send_periodic_updates()
     else:
         timer_periodically()
         if data:
@@ -224,9 +259,9 @@ def process_received_data(data):
 
 #an 180 sec timer
 def timer_periodically():
-        global timer_1 # set timer global to
-        timer_1 = threading.Timer(180,)
-        timer_1.start()  #start to init the timer  timer.cancel() to stop timer
+    global timer_1 # set timer global to
+    timer_1 = threading.Timer(180,)
+    timer_1.start()  #start to init the timer  timer.cancel() to stop timer
 
 
 #after 180sec ,call garbage_collection timer 120s
@@ -237,13 +272,31 @@ def garbage_collection_timer():
 
 
 #after 120sec ,delete the router didn't send packet
-def metric_16(ROUTING_TABLE):
-    for sender_id in ROUTING_TABLE:
-     if sender_id == ROUTING_TABLE[dest][2]:
-         continue
-    else:
-     ROUTING_TABLE[dest] = ["NULL",16,"NULL",0,0,0]
-     return ROUTING_TABLE # 修改了global 的 routing table 之后
+def metric_16(timeout_router):
+    """when timeout for a neighbor, set all routes through that router with metric 16""" 
+    global ROUTING_TABLE
+    try:
+        for dest in ROUTING_TABLE.keys():
+            if timeout_router == ROUTING_TABLE[dest][2]:
+                ROUTING_TABLE[dest][1] = 16 #set metric to 16, keep the other parts remain the same
+    except:
+        print("error occured in metric_16()")
+        sys.exit()
+            
+
+def del_route(dead_router):
+    """delete all routes in the table whose next_router is the dead_router"""
+    global ROUTING_TABLE
+    try:
+        for dest in ROUTING_TABLE.keys():
+            if dead_router == ROUTING_TABLE[dest][2]:
+                del ROUTING_TABLE[dest] # delete the route from table
+    except:
+        print("error occured in del_route()")
+        sys.exit()
+            
+
+
 
 
 def main(filename):
@@ -252,12 +305,12 @@ def main(filename):
     global INPUT_PORTS
     global OUTPUTS
     global TIMER
+    global SOCKETS
     #filename = sys.argv[1]
     ROUTER_ID, INPUT_PORTS, OUTPUTS, TIMER = read_config_file(filename)
     #a list to store sockets, for later closure
-    sockets = create_sockets(INPUT_PORTS, IP_ADDRESS)
-    data = create_update(ROUTER_ID, command)
-    send_periodic_updates(OUTPUTS)
+    SOCKETS = create_sockets(INPUT_PORTS)
+    send_periodic_updates()
 
 
 

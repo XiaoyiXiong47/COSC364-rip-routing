@@ -1,4 +1,4 @@
 router_id 6
 input-ports 6016,6056 
 outputs 6061-5-1,6065-1-5
-timer 100
+timer 30,90
