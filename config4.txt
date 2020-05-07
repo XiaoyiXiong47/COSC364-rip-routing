@@ -1,4 +1,4 @@
 router_id 4
 input-ports 6034,6054,6074
 outputs 6043-3-3,6045-2-5,6047-6-7
-timer 30,90
+timer 30,90,60
