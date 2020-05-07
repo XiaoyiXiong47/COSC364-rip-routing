@@ -1,11 +1,11 @@
 import json
 import socket
 import sys
-import _thread
 import select
 import time
 import queue
 import threading
+from threading import *
 
 IP_ADDRESS = "127.0.0.1"
 ROUTER_ID = 0  # 1
@@ -20,21 +20,35 @@ UPDATE_TIMER = None
 PRINT_TIMER = None
 
 
+class repeating_timer(Timer):
+
+    def __init__(self, interval, function, args=[], kwargs={}):
+        Timer.__init__(self, interval, function, args=[], kwargs={})
+
+    def run(self):
+        while True:
+            self.finished.wait(self.interval)
+            if self.finished.is_set():
+                self.finished.set()
+                break
+
+            self.function(*self.args,**self.kwargs)
+
+
 # result = return of def create_sockets(input_no):
 def event_loop():
     while True:
         #try:
         readable, _, _ = select.select(SOCKETS, [], []) # all conne list contain the input port sockets
         for s in readable:
-            try:
-                data = s.recv(1024)
-                print("received data, move to process_received_data(data)")
-                if data:
-                    process_received_data(data)
-                else:
-                    continue                
-            except:
-                pass
+            conn, addr = s.accept()
+            data = conn.recv(1024)
+            print("received data, move to process_received_data(data)")
+            if data:
+                process_received_data(data)
+            else:
+                continue 
+            conn.close()
         #except:
             #print("error occured in event_loop")
             #quit()
@@ -165,6 +179,8 @@ def send_periodic_updates():
             s.connect((IP_ADDRESS, output_port))
             s.send(data)
             s.close()
+            print("data : ", data)
+            print("successfully sent data to", str(output_port))
         except ConnectionRefusedError:
             print("ConnectionRefused for {}, check the status of corresponding socket".format(output_port))
 
@@ -187,11 +203,10 @@ def send_triggered_updates(destination):
 def process_received_data(data):
     """process received data, and update routing table"""
     global ROUTING_TABLE
-
     command = data[0]
     version = data[1]
     sender_id = data[2]
-
+    print("processing received data from {}........".format(sender_id))
     #restart timeout timer for sender router
     set_timer(TIMER[1],sender_id)
     if command == 1:  # packet is request, send routing table to neighbor
@@ -201,7 +216,8 @@ def process_received_data(data):
         for i in OUTPUTS:  # response packet,#calculate the cost for itself to get to the sender of the packet,#check the routing table contained in the packet, and update own routing table
             i = i.split('-')
             if int(i[2]) == sender_id:
-                cost_to_sender = int(i[2])  # process each RIP entry
+                cost_to_sender = int(i[1])  # process each RIP entry
+        print("cost to router {} is {}".format(sender_id, cost_to_sender))
         packet_length = len(data)
         i = 3
         change_flag = False  # a flag indicates invalid route
@@ -219,10 +235,10 @@ def process_received_data(data):
             metric = data[i + 5]
 
             change_flag = False
-            if zero1 == 0 and zero2 == 0 and zero3 == 0:  # check the validaty of packet
+            if (zero1 == 0) and (zero2 == 0) and (zero3 == 0):  # check the validaty of packet
                 if afi == 0:
                     total_cost = metric + cost_to_sender
-                    if dest in ROUTING_TABLE:
+                    if dest in ROUTING_TABLE.keys():
                         if total_cost < ROUTING_TABLE[dest][1]:
                             ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
                         else:
@@ -235,6 +251,7 @@ def process_received_data(data):
                                 else:
                                     ROUTING_TABLE[dest] = [dest, 16, sender_id]
                                     change_flag = True
+                                    print("route to dest {} through {} has become valid".format(dest, sender_id))
                             else:
                                 # 不是同一更新源，丢弃
                                 pass
@@ -247,6 +264,8 @@ def process_received_data(data):
             # there is at least one route has become invalid
             # triggered updates
             send_periodic_updates()
+    print("process of received data from {} has completed!!!!!!!".format(sender_id))
+    print_table()
 
 
 
@@ -256,7 +275,7 @@ def set_timer(interval, router_id):  #TIMER = []  # [peirodic_timer, timeout, ga
     if interval == TIMER[1]:  # timeout interval
         if router_id not in TIMER_DIC.keys():
             # this is a new connected router, set a new timer for it
-            t = threading.Timer(interval, metric_16, args=(router_id))
+            t = threading.Timer(interval, metric_16, (router_id,))
             t.start()
             TIMER_DIC[router_id] = t
         else:
@@ -264,7 +283,7 @@ def set_timer(interval, router_id):  #TIMER = []  # [peirodic_timer, timeout, ga
             t = TIMER_DIC[router_id]
             t.cancel()
             del TIMER_DIC[router_id]
-            new_t = threading.Timer(interval, metric_16, args=(router_id))
+            new_t = threading.Timer(interval, metric_16, (router_id,))
             new_t.start()
             TIMER_DIC[router_id] = new_t
     elif interval == TIMER[2]:  # garbage collection
@@ -272,19 +291,19 @@ def set_timer(interval, router_id):  #TIMER = []  # [peirodic_timer, timeout, ga
         t = TIMER_DIC[router_id]
         t.cancel()
         del TIMER_DIC[router_id]
-        new_t = threading.Timer(interval, del_route)
+        new_t = threading.Timer(interval, del_route, (router_id,))
         new_t.start()
         TIMER_DIC[router_id] = new_t
     else:
         print("invaild timer value")
         quit()
 
-
 # after 120sec ,delete the router didn't send packet
 def metric_16(timeout_router):
     """when timeout for a neighbor, set all routes through that router with metric 16"""
     global ROUTING_TABLE
     try:
+        print("timeout occured, start garbage-collection timer and set metic 16")
         for dest in ROUTING_TABLE.keys():
             if timeout_router == ROUTING_TABLE[dest][2]:
                 ROUTING_TABLE[dest][1] = 16  # set metric to 16, keep the other parts remain the same
@@ -297,17 +316,29 @@ def metric_16(timeout_router):
         sys.exit()
 
 
+#def del_route(dead_router):
+    #"""delete all routes in the table whose next_router is the dead_router"""
+    #global ROUTING_TABLE
+    ##try:
+    #for dest in ROUTING_TABLE.keys():
+        #if dead_router == ROUTING_TABLE[dest][2]:
+            #del ROUTING_TABLE[dest]  # delete the route from table
+    #print("del_route successfully")
+    ##except:
+        ##print("error occured in del_route()")
+        ##sys.exit()
 def del_route(dead_router):
     """delete all routes in the table whose next_router is the dead_router"""
     global ROUTING_TABLE
-    try:
-        for dest in ROUTING_TABLE.keys():
-            if dead_router == ROUTING_TABLE[dest][2]:
-                del ROUTING_TABLE[dest]  # delete the route from table
-        print("del_route successfully")
-    except:
-        print("error occured in del_route()")
-        sys.exit()
+    #try:
+    for dest in ROUTING_TABLE.keys():
+        if (dead_router == ROUTING_TABLE[dest][2]):
+            del ROUTING_TABLE[dest]  # delete the route from table
+    print("del_route successfully")
+    #except:
+        #print("error occured in del_route()")
+        #sys.exit()
+
 
 
 def del_timer():
@@ -376,9 +407,10 @@ def main():
     SOCKETS = create_sockets()
     create_table()
     print_table()
-    UPDATE_TIMER = threading.Timer(TIMER[0], send_periodic_updates)
+    send_periodic_updates()
+    UPDATE_TIMER = repeating_timer(TIMER[0], send_periodic_updates)
     UPDATE_TIMER.start()
-    PRINT_TIMER = threading.Timer(TIMER[0], print_table)
+    PRINT_TIMER = repeating_timer(TIMER[0], print_table)
     PRINT_TIMER.start()
     event_loop()
 
