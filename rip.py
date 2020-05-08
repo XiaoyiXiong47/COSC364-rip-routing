@@ -186,10 +186,10 @@ def send_periodic_updates(first_timer=0):
             s.connect((IP_ADDRESS, output_port))
             s.send(data)
             s.close()
-            print("data : ", data)
+            #print("data : ", data)
             print("successfully sent data to", str(output_port))
         except ConnectionRefusedError:
-            print("ConnectionRefused for {}, check the status of corresponding socket".format(output_port))
+            print("Connection Refused for {}, check the status of corresponding socket".format(output_port))
 
 
 def send_triggered_updates(destination):
@@ -343,17 +343,6 @@ def metric_16(timeout_router):
         sys.exit()
 
 
-#def del_route(dead_router):
-    #"""delete all routes in the table whose next_router is the dead_router"""
-    #global ROUTING_TABLE
-    ##try:
-    #for dest in ROUTING_TABLE.keys():
-        #if dead_router == ROUTING_TABLE[dest][2]:
-            #del ROUTING_TABLE[dest]  # delete the route from table
-    #print("del_route successfully")
-    ##except:
-        ##print("error occured in del_route()")
-        ##sys.exit()
 def del_route(dead_router):
     """delete all routes in the table whose next_router is the dead_router"""
     global ROUTING_TABLE
