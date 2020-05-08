@@ -43,7 +43,6 @@ def event_loop():
         for s in readable:
             conn, addr = s.accept()
             data = conn.recv(1024)
-            print("received data, move to process_received_data(data)")
             if data:
                 process_received_data(data)
             else:
@@ -115,12 +114,14 @@ def create_sockets():
 def create_table():
     """initialise ROUTING_TABLE, create routes for thoes in the configuration file"""
     global ROUTING_TABLE
+    global TIMER_DIC
     for i in OUTPUTS: #OUTPUTS = []  # ['6012-1-2', '6016-5-6', '6017-8-7']
         info = i.split('-')  # [port, metric, router_id]
         neighbor_id = int(info[2])
         metric = int(info[1])
         output_port = int(info[0])
         ROUTING_TABLE[neighbor_id] = [neighbor_id, metric, neighbor_id]
+        set_timer(TIMER[1], neighbor_id)
 
 
 def print_table():
@@ -133,7 +134,7 @@ def print_table():
     print("======================================================")
 
 
-def create_update(dest_router_id, command):
+def create_update(dest_router_id, command, first_time=0):
     """create a update message which will be sent to a neighbor(destID)"""
     data = bytearray()
     # adds command to indicate request packet(1) or response packet(2)
@@ -159,12 +160,15 @@ def create_update(dest_router_id, command):
             data.append(route[1] & 0xFFFFFFFF)
         else:
             # next hop is the destination of this packet
-            # according to split horizon, set the metric field to infinite
-            data.append(16 & 0xFFFFFFFF)
+            if first_time == 0:
+                # according to split horizon, set the metric field to infinite
+                data.append(16 & 0xFFFFFFFF)
+            else:
+                data.append(route[1] & 0xFFFFFFFF)
     return data
 
 
-def send_periodic_updates():
+def send_periodic_updates(first_timer=0):
     """sends periodic updates to all its neighbors"""
     for neighbor in OUTPUTS:
         neighbor = neighbor.split('-')
@@ -172,7 +176,10 @@ def send_periodic_updates():
         metric = int(neighbor[1])
         neighbor_id = int(neighbor[2])
         # create update message
-        data = create_update(neighbor_id, 2)
+        if first_timer == 0:
+            data = create_update(neighbor_id, 2)
+        else:
+            data = create_update(neighbor_id, 2, 1)
         # send message to corresponding port
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -206,9 +213,11 @@ def process_received_data(data):
     command = data[0]
     version = data[1]
     sender_id = data[2]
-    print("processing received data from {}........".format(sender_id))
+    set_timer(TIMER[1], sender_id)
+    print("processing received data from {} ........".format(sender_id))
+
+    
     #restart timeout timer for sender router
-    set_timer(TIMER[1],sender_id)
     if command == 1:  # packet is request, send routing table to neighbor
         print("received a request packet, send triggered update")
         send_triggered_updates(sender_id)
@@ -217,7 +226,7 @@ def process_received_data(data):
             i = i.split('-')
             if int(i[2]) == sender_id:
                 cost_to_sender = int(i[1])  # process each RIP entry
-        print("cost to router {} is {}".format(sender_id, cost_to_sender))
+        #print("cost to router {} is {}".format(sender_id, cost_to_sender))
         packet_length = len(data)
         i = 3
         change_flag = False  # a flag indicates invalid route
@@ -241,6 +250,7 @@ def process_received_data(data):
                     if dest in ROUTING_TABLE.keys():
                         if total_cost < ROUTING_TABLE[dest][1]:
                             ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
+                            set_timer(TIMER[1], dest)
                         else:
                             # check if the sender is actually the next hop of this route
                             if sender_id == ROUTING_TABLE[dest][2]:
@@ -248,23 +258,40 @@ def process_received_data(data):
                                 # 如果是同一更新源，无论如何都更新
                                 if total_cost <= 15:
                                     ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
+                                    set_timer(TIMER[1],dest)
                                 else:
-                                    ROUTING_TABLE[dest] = [dest, 16, sender_id]
-                                    change_flag = True
-                                    print("route to dest {} through {} has become valid".format(dest, sender_id))
+                                    if ROUTING_TABLE[dest][1] == 16:
+                                        #if the current table has this route with metric 16, do not reset the timeout
+                                        print("route to dest {} through {} is still invalid".format(dest, sender_id))
+                                    else:
+                                        #the route has become invalid for the first time
+                                        ROUTING_TABLE[dest] = [dest, 16, sender_id]
+                                        set_timer(TIMER[2],dest)
+                                        change_flag = True
+                                        print("route to dest {} through {} has become invalid".format(dest, sender_id))
                             else:
                                 # 不是同一更新源，丢弃
                                 pass
                     else:
                         # this is a new route
-                        if total_cost <= 15:
+                        if (total_cost <= 15) and (dest != ROUTER_ID):
                             ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
+                            set_timer(TIMER[1], dest)
+                        elif (dest == ROUTER_ID) and (metric <= 15) and (sender_id not in ROUTING_TABLE.keys()):
+                            ROUTING_TABLE[sender_id] = [sender_id, metric, sender_id]
+                            set_timer(TIMER[1], sender_id)
+                            
+                            
+                else:
+                    print("the Address Family Identifier field dose not match")
+            else:
+                print("the Must Be Zero field is not zero!")
             i += 6
         if change_flag:
             # there is at least one route has become invalid
             # triggered updates
             send_periodic_updates()
-    print("process of received data from {} has completed!!!!!!!".format(sender_id))
+    print("process of received data from {} has completed".format(sender_id))
     print_table()
 
 
@@ -303,9 +330,9 @@ def metric_16(timeout_router):
     """when timeout for a neighbor, set all routes through that router with metric 16"""
     global ROUTING_TABLE
     try:
-        print("timeout occured, start garbage-collection timer and set metic 16")
+        print("timeout occured, start garbage-collection timer for {} and set metic 16".format(timeout_router))
         for dest in ROUTING_TABLE.keys():
-            if timeout_router == ROUTING_TABLE[dest][2]:
+            if dest == timeout_router:
                 ROUTING_TABLE[dest][1] = 16  # set metric to 16, keep the other parts remain the same
         #start garbage-collection timer
         set_timer(TIMER[2],timeout_router)
@@ -331,10 +358,8 @@ def del_route(dead_router):
     """delete all routes in the table whose next_router is the dead_router"""
     global ROUTING_TABLE
     #try:
-    for dest in ROUTING_TABLE.keys():
-        if (dead_router == ROUTING_TABLE[dest][2]):
-            del ROUTING_TABLE[dest]  # delete the route from table
-    print("del_route successfully")
+    del ROUTING_TABLE[dead_router]  # delete the route from table
+    print("del_route for {} successfully".format(dead_router))
     #except:
         #print("error occured in del_route()")
         #sys.exit()
@@ -407,7 +432,7 @@ def main():
     SOCKETS = create_sockets()
     create_table()
     print_table()
-    send_periodic_updates()
+    send_periodic_updates(1) # 1 means first_time is True
     UPDATE_TIMER = repeating_timer(TIMER[0], send_periodic_updates)
     UPDATE_TIMER.start()
     PRINT_TIMER = repeating_timer(TIMER[0], print_table)
