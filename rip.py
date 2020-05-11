@@ -132,6 +132,7 @@ def print_table():
     """print the routing table"""
     temp = "   {0}          {1}         {2} "
     print("======================================================")
+    print("Routing talbe of router {}".format(ROUTER_ID))
     print("Destination     Metric     Next-hop")
     for route in ROUTING_TABLE.keys():
         print(temp.format(ROUTING_TABLE[route][0], ROUTING_TABLE[route][1], ROUTING_TABLE[route][2]))
@@ -149,27 +150,28 @@ def create_update(dest_router_id, command, first_time=0):
     # router id which generated the packet
     data.append(ROUTER_ID & 0xFFFF)
     # RIP entries
-    for key in ROUTING_TABLE.keys():
-        route = ROUTING_TABLE[key]
-        # Address Family Identifier = 0 as reserved
-        data.append(0 & 0xFFFF)
-        # must be zero field
-        data.append(0 & 0xFFFF)
-        # destination router id of this route
-        data.append(route[0] & 0xFFFFFFFF)
-        # must be zero field
-        data.append(0 & 0xFFFFFFFF)
-        data.append(0 & 0xFFFFFFFF)
-        # when the next hop is not the destination of this packet
-        if route[2] != dest_router_id:
-            data.append(route[1] & 0xFFFFFFFF)
-        else:
-            # next hop is the destination of this packet
-            if first_time == 0:
-                # according to split horizon, set the metric field to infinite
-                data.append(16 & 0xFFFFFFFF)
-            else:
+    if command == 2:
+        for key in ROUTING_TABLE.keys():
+            route = ROUTING_TABLE[key]
+            # Address Family Identifier = 0 as reserved
+            data.append(0 & 0xFFFF)
+            # must be zero field
+            data.append(0 & 0xFFFF)
+            # destination router id of this route
+            data.append(route[0] & 0xFFFFFFFF)
+            # must be zero field
+            data.append(0 & 0xFFFFFFFF)
+            data.append(0 & 0xFFFFFFFF)
+            # when the next hop is not the destination of this packet
+            if route[2] != dest_router_id:
                 data.append(route[1] & 0xFFFFFFFF)
+            else:
+                # next hop is the destination of this packet
+                if first_time == 0:
+                    # according to split horizon, set the metric field to infinite
+                    data.append(16 & 0xFFFFFFFF)
+                else:
+                    data.append(route[1] & 0xFFFFFFFF)
     return data
 
 
@@ -292,11 +294,11 @@ def process_received_data(data):
                             ROUTING_TABLE[dest] = [dest, total_cost, sender_id]
                             set_timer(TIMER[1], dest)
                             change_flag = True
-                        elif (dest == ROUTER_ID) and (metric <= 15) and (sender_id not in ROUTING_TABLE.keys()):
+                        elif (dest == ROUTER_ID) and (metric <= 15): #and (sender_id not in ROUTING_TABLE.keys()):
                             ROUTING_TABLE[sender_id] = [sender_id, metric, sender_id]
                             set_timer(TIMER[1], sender_id)
                             change_flag = True
-                            
+        
                             
                 else:
                     print("the Address Family Identifier field dose not match")
@@ -455,7 +457,6 @@ def main():
     # a list to store sockets, for later closure
     SOCKETS = create_sockets()
     create_table()
-    print_table()
     send_periodic_updates(1) # 1 means first_time is True
     UPDATE_TIMER = repeating_timer(TIMER[0], send_periodic_updates)
     UPDATE_TIMER.start()
